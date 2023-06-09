@@ -167,7 +167,7 @@ const Form = () => {
             try {
                 const response = await saveQuoteSubmission({ reCaptchaValue, formData, formProperties });
 
-                if (response && response.data && response.data['save_quote_Submission'] && response.data['save_quote_Submission'].success) {
+                if (response && response.success) {
                     showSuccess();
                 } else if (response && response.errors) {
                     showError(response.errors);
