@@ -43,7 +43,7 @@ const RECAPTCHA_SITE_KEY = '6Lce6nQmAAAAAO5d4LWC6TkECxNRSG7WNiVj17B1';
 
 async function getFormProperties(formId) {
   // See https://docs.solspace.com/craft/freeform/v4/developer/graphql/#how-to-render-a-form
-  const response = await fetch(`https://demo.solspace.net/craft/freeform/form/properties/${formId}`, { headers: { 'Accept': 'application/json' }});
+  const response = await fetch(`/freeform/form/properties/${formId}`, { headers: { 'Accept': 'application/json' }});
 
   if (!response.ok) {
     throw new Error('Failed to fetch Craft Freeform Form properties');
@@ -83,7 +83,7 @@ async function saveQuoteSubmission(params) {
 
     body.append('acceptTerms', formData.acceptTerms);
 
-    const response = await fetch('https://demo.solspace.net/craft/actions/freeform/submit', {
+    const response = await fetch('/actions/freeform/submit', {
         method: 'POST',
         headers: {
             'X-CSRF-Token': csrf.token,
