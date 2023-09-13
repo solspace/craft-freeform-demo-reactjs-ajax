@@ -172,6 +172,9 @@ const Form = () => {
         handleReCaptchaVerify().then(async () => {
             const response = await saveQuoteSubmission({ reCaptchaValue, formData, formProperties });
 
+            stopProcessing();
+            event.target.reset();
+
             if (response && response.success) {
                 showSubmissionSuccess();
             } else if (response && response.errors) {
@@ -186,9 +189,6 @@ const Form = () => {
                     }
                 }
             }
-
-            stopProcessing();
-            event.target.reset();
         });
     };
 
