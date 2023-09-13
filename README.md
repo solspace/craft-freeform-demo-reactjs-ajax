@@ -1,5 +1,5 @@
 # Freeform + React JS + AJAX Demo
-This is a demo of a [React JS](https://react.dev/) + AJAX, headless project using [Freeform 4](https://docs.solspace.com/craft/freeform/v4) for [Craft CMS 4](https://craftcms.com).
+This is a demo of a [React JS](https://react.dev/) + AJAX, headless project using [Freeform 5](https://docs.solspace.com/craft/freeform/v5) for [Craft CMS 4](https://craftcms.com).
 
 ## Freeform Demo
 This demo connects to the [Freeform Demo](https://demo.solspace.net/craft/freeform-demo/) site.
@@ -10,4 +10,4 @@ We've implemented reCAPTCHA v3 by default, but reCAPTCHA v2 and hCaptcha are als
 ## Documentation
 Documentation for implementing Freeform with these can be viewed here:
 
-- [Freeform + React JS](https://docs.solspace.com/craft/freeform/v4/headless/reactjs/)
+- [Freeform + React JS](https://docs.solspace.com/craft/freeform/v5/headless/reactjs/)
