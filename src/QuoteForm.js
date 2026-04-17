@@ -2,10 +2,10 @@ import React, { useCallback, useEffect, useState } from 'react';
 import { GoogleReCaptchaProvider, useGoogleReCaptcha } from 'react-google-recaptcha-v3';
 
 // ENTER YOUR FORM ID HERE
-const FORM_ID = 21;
+const FORM_ID = undefined;
 
 // ENTER YOUR RECAPTCHA KEY HERE
-const RECAPTCHA_SITE_KEY = '6Lce6nQmAAAAAO5d4LWC6TkECxNRSG7WNiVj17B1';
+const RECAPTCHA_SITE_KEY = undefined;
 
 const defaultFormData = {
     workPhone: '',
@@ -113,116 +113,157 @@ const Form = () => {
     const { executeRecaptcha } = useGoogleReCaptcha();
 
     const [formData, setFormData] = useState(defaultFormData);
-    const [captchaValue, setCaptchaValue] = useState('');
     const [formProperties, setFormProperties] = useState(defaultFormProperties);
+    const [showSpam, setShowSpam] = useState(false);
+    const [showError, setShowError] = useState(false);
+    const [showSuccess, setShowSuccess] = useState(false);
+    const [isProcessing, setIsProcessing] = useState(false);
+    const [fieldErrors, setFieldErrors] = useState({});
 
-    const spamMessage = document.querySelector('#spamMessage');
-    const errorMessage = document.querySelector('#errorMessage');
-    const successMessage = document.querySelector('#successMessage');
-    const submitButton = document.querySelector('button[type="submit"]');
+    const isFormReady = Boolean(formProperties.csrf?.name && formProperties.csrf?.token && formProperties.honeypot?.name && formProperties.hash && formProperties.freeform_payload);
 
     const startProcessing = () => {
-        submitButton.style.cursor = 'not-allowed';
-        submitButton.innerText = formProperties.settings.behavior.processingText;
+        setIsProcessing(true);
     };
 
     const stopProcessing = () => {
-        submitButton.innerText = 'Submit';
-        submitButton.style.cursor = 'pointer';
+        setIsProcessing(false);
     };
 
     const showSubmissionSuccess = () => {
-        successMessage.style.display = 'block';
+        setShowSuccess(true);
         scrollToTop();
     };
 
     const hideSubmissionSuccess = () => {
-        successMessage.style.display = 'none';
+        setShowSuccess(false);
     };
 
     const showSubmissionError = () => {
-        errorMessage.style.display = 'block';
-        scrollToTop();
-    };
-
-    const showSpamError = () => {
-        spamMessage.style.display = 'block';
+        setShowError(true);
         scrollToTop();
     };
 
     const hideSubmissionError = () => {
-        errorMessage.style.display = 'none';
+        setShowError(false);
+        setFieldErrors({});
+    };
 
-        const errors = document.querySelectorAll('.error-message');
-        if (errors) {
-            errors.forEach(error => {
-                error.classList.remove('flex');
-                error.classList.add('hidden');
-            });
-        }
+    const showSpamError = () => {
+        setShowSpam(true);
+        scrollToTop();
     };
 
     const hideSpamError = () => {
-        spamMessage.style.display = 'none';
+        setShowSpam(false);
+    };
+
+    const showFieldError = (errors) => {
+        const nextErrors = {};
+
+        for (const [key, value] of Object.entries(errors)) {
+            if (!/^-?\d+$/.test(key) && Array.isArray(value) && value.length) {
+                nextErrors[key] = value[0];
+            }
+        }
+
+        setFieldErrors(nextErrors);
+    };
+
+    const clearFieldError = (fieldName) => {
+        setFieldErrors((currentErrors) => {
+            const nextErrors = { ...currentErrors };
+
+            delete nextErrors[fieldName];
+
+            return nextErrors;
+        });
     };
 
     const scrollToTop = () => {
-        window.scrollTo({ top: 0, behavior: 'smooth' });
+        window.scrollTo({
+            top: 0,
+            behavior: 'smooth',
+        });
     };
 
     const handleReCaptchaVerify = useCallback(async () => {
         if (!executeRecaptcha) {
-            return;
+            return null;
         }
 
-        const token = await executeRecaptcha();
-        setCaptchaValue(token);
+        return await executeRecaptcha('submit');
     }, [executeRecaptcha]);
 
     const handleSubmit = async (event) => {
         event.preventDefault();
+
+        if (!isFormReady) {
+            return;
+        }
 
         hideSpamError();
         hideSubmissionError();
         hideSubmissionSuccess();
         startProcessing();
 
-        handleReCaptchaVerify().then(async () => {
+        try {
+            const captchaValue = await handleReCaptchaVerify();
             const response = await saveQuoteSubmission({ captchaValue, formData, formProperties });
 
             stopProcessing();
-            event.target.reset();
 
             if (response && response.success) {
+                setFormData(defaultFormData);
+                setFieldErrors({});
+
                 showSubmissionSuccess();
-            } else if (response && response.formErrors && response.formErrors.length > 0) {
-                if (response.formErrors.includes('Please verify that you are not a robot.')) {
-                    showSpamError();
-                } else if (response.formErrors.includes('Unknown argument')) {
-                    console.error(response.formErrors);
-                }
-            } else if (response && response.errors) {
+            } else if (response) {
                 showSubmissionError();
 
-                for (const [key, value] of Object.entries(response.errors)) {
-                    if (!/^-?\d+$/.test(key)) {
-                        const element = document.querySelector(`.${key}-field .error-message`);
-                        if (element) {
-                            element.innerHTML = value[0];
-                            element.classList.add('flex');
-                            element.classList.remove('hidden');
-                        }
+                let hasSpamError = false;
+
+                if (response.errors) {
+                    showFieldError(response.errors);
+                }
+
+                if (response.formErrors && response.formErrors.length > 0) {
+                    const formErrors = response.formErrors;
+
+                    if (formErrors.includes('Please verify that you are not a robot.')) {
+                        hasSpamError = true;
+                    }
+
+                    if (formErrors.includes('Unknown argument')) {
+                        console.error(formErrors);
+                    }
+
+                    if (!hasSpamError && !formErrors.includes('Unknown argument')) {
+                        console.error(formErrors);
                     }
                 }
+
+                if (hasSpamError) {
+                    showSpamError();
+                }
+            } else {
+                showSubmissionError();
             }
-        });
+        } catch (error) {
+            stopProcessing();
+            showSubmissionError();
+
+            console.error(error);
+        }
     };
 
     const handleHowDidYouHearAboutThisJobPosting = (event) => {
         let howDidYouHearAboutThisJobPosting = [...formData.howDidYouHearAboutThisJobPosting];
 
         if (event.target.checked) {
-            howDidYouHearAboutThisJobPosting.push(event.target.value);
+            if (!howDidYouHearAboutThisJobPosting.includes(event.target.value)) {
+                howDidYouHearAboutThisJobPosting.push(event.target.value);
+            }
         } else {
             howDidYouHearAboutThisJobPosting = howDidYouHearAboutThisJobPosting.filter((value) => value !== event.target.value);
         }
@@ -233,10 +274,6 @@ const Form = () => {
         });
     };
 
-    useEffect(() => {
-        handleReCaptchaVerify().then();
-    }, [handleReCaptchaVerify]);
-
     /**
      * Note the ignore variable which is initialized to false, and is set to true during cleanup.
      * This ensures your code doesn't suffer from "race conditions": network responses may arrive in a different order than you sent them.
@@ -244,12 +281,14 @@ const Form = () => {
     useEffect(() => {
         let ignore = false;
 
-        // Set your Freeform Form ID from Craft.
-        const formId = 4;
-
-        getFormProperties(formId).then(formProperties => {
+        getFormProperties().then(formProperties => {
             if (!ignore) {
                 setFormProperties(formProperties);
+            }
+        }).catch(error => {
+            if (!ignore) {
+                console.error(error);
+                setShowError(true);
             }
         });
 
@@ -261,26 +300,36 @@ const Form = () => {
     return (
         <form className="text-center flex flex-col items-left justify-left" onSubmit={handleSubmit}>
             <h3 className="mb-4 text-xl font-normal text-left">Quote Form</h3>
-            <div id="successMessage" className="w-full bg-green-100 border border-green-400 text-sm text-left text-green-700 px-4 py-2 rounded-md mb-8" style={{ display: 'none' }}>
-                <p>{formProperties.settings.behavior.successMessage}</p>
-            </div>
-            <div id="errorMessage" className="w-full bg-red-100 border border-red-400 text-sm text-left text-red-700 px-4 py-2 rounded-md mb-8" style={{ display: 'none' }}>
-                <p>{formProperties.settings.behavior.errorMessage}</p>
-            </div>
-            <div id="spamMessage" className="w-full bg-red-100 border border-red-400 text-sm text-left text-red-700 px-4 py-2 rounded-md mb-8" style={{ display: 'none' }}>
-                <p>Please verify that you are not a robot.</p>
-            </div>
+            {showSuccess && (
+                <div id="successMessage" className="w-full bg-green-100 border border-green-400 text-sm text-left text-green-700 px-4 py-2 rounded-md mb-8">
+                    <p>{formProperties.settings.behavior.successMessage}</p>
+                </div>
+            )}
+            {showError && (
+                <div id="errorMessage" className="w-full bg-red-100 border border-red-400 text-sm text-left text-red-700 px-4 py-2 rounded-md mb-8">
+                    <p>{formProperties.settings.behavior.errorMessage}</p>
+                </div>
+            )}
+            {showSpam && (
+                <div id="spamMessage" className="w-full bg-red-100 border border-red-400 text-sm text-left text-red-700 px-4 py-2 rounded-md mb-8">
+                    <p>Please verify that you are not a robot.</p>
+                </div>
+            )}
             <div className="flex flex-col w-full space-y-3">
                 <div className="form-row">
                     <div className="field-wrapper firstName-field">
                         <label htmlFor="firstName">First Name <span className="ml-1 text-[red]">*</span></label>
-                        <input className="form-input field-input" name="firstName" type="text" id="firstName" value={formData.firstName} onChange={event => setFormData({ ...formData, firstName: event.target.value })} />
-                        <span className="field-error error-message hidden"></span>
+                        <input className="form-input field-input" name="firstName" type="text" id="firstName" value={formData.firstName} onChange={event => { setFormData({ ...formData, firstName: event.target.value }); clearFieldError('firstName'); }} />
+                        {fieldErrors.firstName && (
+                            <span className="field-error error-message">{fieldErrors.firstName}</span>
+                        )}
                     </div>
                     <div className="field-wrapper lastName-field">
                         <label htmlFor="lastName">Last Name <span className="ml-1 text-[red]">*</span></label>
-                        <input className="form-input field-input" name="lastName" type="text" id="lastName" value={formData.lastName} onChange={event => setFormData({ ...formData, lastName: event.target.value })} />
-                        <span className="field-error error-message hidden"></span>
+                        <input className="form-input field-input" name="lastName" type="text" id="lastName" value={formData.lastName} onChange={event => { setFormData({ ...formData, lastName: event.target.value }); clearFieldError('lastName'); }} />
+                        {fieldErrors.lastName && (
+                            <span className="field-error error-message">{fieldErrors.lastName}</span>
+                        )}
                     </div>
                 </div>
                 <div className="form-row">
@@ -293,15 +342,19 @@ const Form = () => {
                     <div className="field-wrapper email-field">
                         <label htmlFor="email">Email <span className="ml-1 text-[red]">*</span></label>
                         <div className="text-sm text-slate-400">We&apos;ll never share your email with anyone else.</div>
-                        <input className="form-input field-input" name="email" type="email" id="email" value={formData.email} onChange={event => setFormData({ ...formData, email: event.target.value })} />
-                        <span className="field-error error-message hidden"></span>
+                        <input className="form-input field-input" name="email" type="email" id="email" value={formData.email} onChange={event => { setFormData({ ...formData, email: event.target.value }); clearFieldError('email'); }} />
+                        {fieldErrors.email && (
+                            <span className="field-error error-message">{fieldErrors.email}</span>
+                        )}
                     </div>
                 </div>
                 <div className="form-row">
                     <div className="field-wrapper cellPhone-field">
                         <label htmlFor="cellPhone">Cell Phone <span className="ml-1 text-[red]">*</span></label>
-                        <input className="form-input field-input" name="cellPhone" type="tel" id="cellPhone" value={formData.cellPhone} onChange={event => setFormData({ ...formData, cellPhone: event.target.value })} />
-                        <span className="field-error error-message hidden"></span>
+                        <input className="form-input field-input" name="cellPhone" type="tel" id="cellPhone" value={formData.cellPhone} onChange={event => { setFormData({ ...formData, cellPhone: event.target.value }); clearFieldError('cellPhone'); }} />
+                        {fieldErrors.cellPhone && (
+                            <span className="field-error error-message">{fieldErrors.cellPhone}</span>
+                        )}
                     </div>
                     <div className="field-wrapper">
                         <label htmlFor="homePhone">Home Phone</label>
@@ -315,13 +368,15 @@ const Form = () => {
                 <div className="form-row">
                     <div className="field-wrapper subject-field">
                         <label htmlFor="subject">Subject <span className="ml-1 text-[red]">*</span></label>
-                        <select className="form-select field-input" name="subject" id="subject" value={formData.subject} onChange={event => setFormData({ ...formData, subject: event.target.value })}>
+                        <select className="form-select field-input" name="subject" id="subject" value={formData.subject} onChange={event => { setFormData({ ...formData, subject: event.target.value }); clearFieldError('subject'); }}>
                             <option value="">I need some help with...</option>
                             <option value="myHomework">My homework</option>
                             <option value="practicingMyHammerDance">Practicing my hammer dance</option>
                             <option value="findingMyBellyButton">Finding my belly button</option>
                         </select>
-                        <span className="field-error error-message hidden"></span>
+                        {fieldErrors.subject && (
+                            <span className="field-error error-message">{fieldErrors.subject}</span>
+                        )}
                     </div>
                     <div className="field-wrapper">
                         <label htmlFor="appointmentDate">Appointment Date</label>
@@ -329,13 +384,15 @@ const Form = () => {
                     </div>
                     <div className="field-wrapper department-field">
                         <label htmlFor="department">Department <span className="ml-1 text-[red]">*</span></label>
-                        <select className="form-select field-input" name="department" id="department" value={formData.department} onChange={event => setFormData({ ...formData, department: event.target.value })}>
+                        <select className="form-select field-input" name="department" id="department" value={formData.department} onChange={event => { setFormData({ ...formData, department: event.target.value }); clearFieldError('department'); }}>
                             <option value="">Please choose...</option>
                             <option value="sales@example.com">Sales</option>
                             <option value="service@example.com">Service</option>
                             <option value="support@example.com">Support</option>
                         </select>
-                        <span className="field-error error-message hidden"></span>
+                        {fieldErrors.department && (
+                            <span className="field-error error-message">{fieldErrors.department}</span>
+                        )}
                     </div>
                 </div>
                 <div className="form-row">
@@ -363,8 +420,10 @@ const Form = () => {
                 <div className="form-row">
                     <div className="field-wrapper message-field">
                         <label htmlFor="message">Message <span className="ml-1 text-[red]">*</span></label>
-                        <textarea className="form-textarea field-input" name="message" id="message" rows={5} value={formData.message} onChange={event => setFormData({ ...formData, message: event.target.value })}></textarea>
-                        <span className="field-error error-message hidden"></span>
+                        <textarea className="form-textarea field-input" name="message" id="message" rows={5} value={formData.message} onChange={event => { setFormData({ ...formData, message: event.target.value }); clearFieldError('message'); }}></textarea>
+                        {fieldErrors.message && (
+                            <span className="field-error error-message">{fieldErrors.message}</span>
+                        )}
                     </div>
                 </div>
                 <div className="form-row">
@@ -387,15 +446,17 @@ const Form = () => {
                 <div className="form-row">
                     <div className="field-wrapper acceptTerms-field">
                         <label htmlFor="acceptTerms" className="flex flex-row items-center justify-center">
-                            <input className="field-input-checkbox" name="acceptTerms" type="checkbox" id="acceptTerms" value="yes" onChange={event => setFormData({ ...formData, acceptTerms: event.target.checked ? event.target.value : '' })} />
+                            <input className="field-input-checkbox" name="acceptTerms" type="checkbox" id="acceptTerms" value="yes" onChange={event => { setFormData({ ...formData, acceptTerms: event.target.checked ? event.target.value : '' }); clearFieldError('acceptTerms'); }} />
                             I agree to the <a href="https://solspace.com" className="mx-1 underline">terms &amp; conditions</a> required by this site. <span className="ml-1 text-[red]">*</span>
                         </label>
-                        <span className="field-error error-message hidden"></span>
+                        {fieldErrors.acceptTerms && (
+                            <span className="field-error error-message">{fieldErrors.acceptTerms}</span>
+                        )}
                     </div>
                 </div>
                 <div className="form-row">
                     <div className="flex flex-row items-left justify-left space-y-2 w-full">
-                        <button className="btn-primary" type="submit">Submit</button>
+                        <button className="btn-primary" type="submit" disabled={isProcessing || !isFormReady} style={{ cursor: isProcessing || !isFormReady ? 'not-allowed' : 'pointer' }}>{isProcessing ? (formProperties.settings.behavior.processingText || 'Submitting...') : (!isFormReady ? 'Loading...' : 'Submit')}</button>
                     </div>
                 </div>
             </div>
