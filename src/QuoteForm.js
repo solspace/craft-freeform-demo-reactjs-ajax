@@ -1,6 +1,12 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { GoogleReCaptchaProvider, useGoogleReCaptcha } from 'react-google-recaptcha-v3';
 
+// ENTER YOUR FORM ID HERE
+const FORM_ID = 21;
+
+// ENTER YOUR RECAPTCHA KEY HERE
+const RECAPTCHA_SITE_KEY = '6Lce6nQmAAAAAO5d4LWC6TkECxNRSG7WNiVj17B1';
+
 const defaultFormData = {
     workPhone: '',
     subject: '',
@@ -29,11 +35,6 @@ const defaultFormProperties = {
         value: '',
     },
     freeform_payload: '',
-    captcha: {
-        enabled: false,
-        handle: '',
-        name: '',
-    },
     settings: {
         behavior: {
             processingText: '',
@@ -43,22 +44,24 @@ const defaultFormProperties = {
     },
 };
 
-const RECAPTCHA_SITE_KEY = '6Lce6nQmAAAAAO5d4LWC6TkECxNRSG7WNiVj17B1';
+async function getFormProperties() {
+      // See https://docs.solspace.com/craft/freeform/v5/developer/graphql/#how-to-render-a-form
+      const response = await fetch(`/craft/freeform/form/properties/${FORM_ID}`, {
+          headers: {
+              'Accept': 'application/json',
+          }
+      });
 
-async function getFormProperties(formId) {
-  // See https://docs.solspace.com/craft/freeform/v5/developer/graphql/#how-to-render-a-form
-  const response = await fetch(`/freeform/form/properties/${formId}`, { headers: { 'Accept': 'application/json' }});
+      if (!response.ok) {
+            throw new Error('Failed to fetch Craft Freeform Form properties');
+      }
 
-  if (!response.ok) {
-    throw new Error('Failed to fetch Craft Freeform Form properties');
-  }
-
-  return response.json();
+      return response.json();
 }
 
 async function saveQuoteSubmission(params) {
     const { captchaValue, formData, formProperties } = params;
-    const { csrf, hash, honeypot, freeform_payload, captcha } = formProperties;
+    const { csrf, hash, honeypot, freeform_payload } = formProperties;
 
     const body = new FormData();
     body.append(csrf.name, csrf.token);
@@ -66,7 +69,7 @@ async function saveQuoteSubmission(params) {
 
     body.append('formHash', hash);
     body.append('freeform_payload', freeform_payload);
-    body.append(captcha.name, captchaValue);
+    body.append('g-recaptcha-response', captchaValue);
 
     body.append('firstName', formData.firstName);
     body.append('lastName', formData.lastName);
@@ -87,7 +90,7 @@ async function saveQuoteSubmission(params) {
 
     body.append('acceptTerms', formData.acceptTerms);
 
-    const response = await fetch('/actions/freeform/submit', {
+    const response = await fetch('/craft/actions/freeform/submit', {
         method: 'POST',
         headers: {
             'X-CSRF-Token': csrf.token,
