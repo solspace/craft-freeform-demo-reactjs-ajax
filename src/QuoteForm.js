@@ -2,10 +2,10 @@ import React, { useCallback, useEffect, useState } from 'react';
 import { GoogleReCaptchaProvider, useGoogleReCaptcha } from 'react-google-recaptcha-v3';
 
 // ENTER YOUR FORM ID HERE
-const FORM_ID = 1;
+const FORM_ID = undefined;
 
 // ENTER YOUR RECAPTCHA KEY HERE
-const RECAPTCHA_SITE_KEY = '6LeApZMrAAAAAFL3uAaRsuJH5RsNkn7gyZJsDaFy';
+const RECAPTCHA_SITE_KEY = undefined;
 
 const defaultFormData = {
     workPhone: '',
@@ -35,34 +35,33 @@ const defaultFormProperties = {
         value: '',
     },
     freeform_payload: '',
-    reCaptcha: {
-        enabled: false,
-        handle: '',
-        name: '',
+    settings: {
+        behavior: {
+            processingText: '',
+            successMessage: '',
+            errorMessage: '',
+        },
     },
-    loadingText: '',
-    successMessage: '',
-    errorMessage: '',
 };
 
 async function getFormProperties() {
-    // See https://docs.solspace.com/craft/freeform/v4/developer/graphql/#how-to-render-a-form
-    const response = await fetch(`/freeform/form/properties/${FORM_ID}`, {
-        headers: {
-            'Accept': 'application/json',
-        }
-    });
+      // See https://docs.solspace.com/craft/freeform/v5/developer/graphql/#how-to-render-a-form
+      const response = await fetch(`/craft/freeform/form/properties/${FORM_ID}`, {
+          headers: {
+              'Accept': 'application/json',
+          }
+      });
 
-    if (!response.ok) {
-        throw new Error('Failed to fetch Craft Freeform Form properties');
-    }
+      if (!response.ok) {
+            throw new Error('Failed to fetch Craft Freeform Form properties');
+      }
 
-    return response.json();
+      return response.json();
 }
 
 async function saveQuoteSubmission(params) {
-    const { reCaptchaValue, formData, formProperties } = params;
-    const { csrf, hash, honeypot, freeform_payload, reCaptcha } = formProperties;
+    const { captchaValue, formData, formProperties } = params;
+    const { csrf, hash, honeypot, freeform_payload } = formProperties;
 
     const body = new FormData();
     body.append(csrf.name, csrf.token);
@@ -70,10 +69,7 @@ async function saveQuoteSubmission(params) {
 
     body.append('formHash', hash);
     body.append('freeform_payload', freeform_payload);
-
-    if (reCaptcha?.enabled && reCaptcha.name && reCaptchaValue) {
-        body.append(reCaptcha.name, reCaptchaValue);
-    }
+    body.append('g-recaptcha-response', captchaValue);
 
     body.append('firstName', formData.firstName);
     body.append('lastName', formData.lastName);
@@ -94,12 +90,13 @@ async function saveQuoteSubmission(params) {
 
     body.append('acceptTerms', formData.acceptTerms);
 
-    const response = await fetch('/actions/freeform/submit', {
+    const response = await fetch('/craft/actions/freeform/submit', {
         method: 'POST',
         headers: {
             'X-CSRF-Token': csrf.token,
             'Cache-Control': 'no-cache',
             'X-Requested-With': 'XMLHttpRequest',
+            'HTTP_X_REQUESTED_WITH': 'XMLHttpRequest',
             'X-Craft-Solspace-Freeform-Mode': 'Headless',
         },
         body,
@@ -122,6 +119,8 @@ const Form = () => {
     const [showSuccess, setShowSuccess] = useState(false);
     const [isProcessing, setIsProcessing] = useState(false);
     const [fieldErrors, setFieldErrors] = useState({});
+
+    const isFormReady = Boolean(formProperties.csrf?.name && formProperties.csrf?.token && formProperties.honeypot?.name && formProperties.hash && formProperties.freeform_payload);
 
     const startProcessing = () => {
         setIsProcessing(true);
@@ -188,8 +187,6 @@ const Form = () => {
         });
     };
 
-    const isFormReady = Boolean(formProperties.csrf?.name && formProperties.csrf?.token && formProperties.hash && formProperties.freeform_payload);
-
     const handleReCaptchaVerify = useCallback(async () => {
         if (!executeRecaptcha) {
             return null;
@@ -211,14 +208,10 @@ const Form = () => {
         startProcessing();
 
         try {
-            let reCaptchaValue = null;
-
-            if (formProperties.reCaptcha?.enabled) {
-                reCaptchaValue = await handleReCaptchaVerify();
-            }
+            const captchaValue = await handleReCaptchaVerify();
 
             const response = await saveQuoteSubmission({
-                reCaptchaValue,
+                captchaValue,
                 formData,
                 formProperties
             });
@@ -228,22 +221,36 @@ const Form = () => {
             if (response && response.success) {
                 setFormData(defaultFormData);
                 setFieldErrors({});
-                event.target.reset();
-                showSubmissionSuccess();
-            } else if (response && response.formErrors && response.formErrors.length > 0) {
-                const formErrors = response.formErrors;
 
-                if (formErrors.includes('Please verify that you are not a robot.')) {
-                    showSpamError();
-                } else if (formErrors.includes('Unknown argument')) {
-                    console.error(formErrors);
-                } else {
-                    showSubmissionError();
-                    console.error(formErrors);
-                }
-            } else if (response && response.errors) {
+                showSubmissionSuccess();
+            } else if (response) {
                 showSubmissionError();
-                showFieldError(response.errors);
+
+                let hasSpamError = false;
+
+                if (response.errors) {
+                    showFieldError(response.errors);
+                }
+
+                if (response.formErrors && response.formErrors.length > 0) {
+                    const formErrors = response.formErrors;
+
+                    if (formErrors.includes('Please verify that you are not a robot.')) {
+                        hasSpamError = true;
+                    }
+
+                    if (formErrors.includes('Unknown argument')) {
+                        console.error(formErrors);
+                    }
+
+                    if (!hasSpamError && !formErrors.includes('Unknown argument')) {
+                        console.error(formErrors);
+                    }
+                }
+
+                if (hasSpamError) {
+                    showSpamError();
+                }
             } else {
                 showSubmissionError();
             }
@@ -279,19 +286,16 @@ const Form = () => {
     useEffect(() => {
         let ignore = false;
 
-        getFormProperties()
-            .then((formProperties) => {
-                if (!ignore) {
-                    setFormProperties(formProperties);
-                }
-            })
-            .catch((error) => {
-                if (!ignore) {
-                    console.error(error);
-
-                    setShowError(true);
-                }
-            });
+        getFormProperties().then(formProperties => {
+            if (!ignore) {
+                setFormProperties(formProperties);
+            }
+        }).catch(error => {
+            if (!ignore) {
+                console.error(error);
+                setShowError(true);
+            }
+        });
 
         return () => {
             ignore = true;
@@ -303,16 +307,16 @@ const Form = () => {
             <h3 className="mb-4 text-xl font-normal text-left">Quote Form</h3>
             {showSuccess && (
                 <div id="successMessage" className="w-full bg-green-100 border border-green-400 text-sm text-left text-green-700 px-4 py-2 rounded-md mb-8">
-                    <p>{formProperties.successMessage}</p>
+                    <p>{formProperties.settings.behavior.successMessage}</p>
                 </div>
             )}
             {showError && (
-                <div id="errorMessage" className="w-full bg-red-100 border border-red-400 text-sm text-left text-red-500 px-4 py-2 rounded-md mb-8">
-                    <p>{formProperties.errorMessage}</p>
+                <div id="errorMessage" className="w-full bg-red-100 border border-red-400 text-sm text-left text-red-700 px-4 py-2 rounded-md mb-8">
+                    <p>{formProperties.settings.behavior.errorMessage}</p>
                 </div>
             )}
             {showSpam && (
-                <div id="spamMessage" className="w-full bg-red-100 border border-red-400 text-sm text-left text-red-500 px-4 py-2 rounded-md mb-8">
+                <div id="spamMessage" className="w-full bg-red-100 border border-red-400 text-sm text-left text-red-700 px-4 py-2 rounded-md mb-8">
                     <p>Please verify that you are not a robot.</p>
                 </div>
             )}
@@ -322,14 +326,14 @@ const Form = () => {
                         <label htmlFor="firstName">First Name <span className="ml-1 text-[red]">*</span></label>
                         <input className="form-input field-input" name="firstName" type="text" id="firstName" value={formData.firstName} onChange={event => { setFormData({ ...formData, firstName: event.target.value }); clearFieldError('firstName'); }} />
                         {fieldErrors.firstName && (
-                            <span className="field-error error-message flex">{fieldErrors.firstName}</span>
+                            <span className="field-error error-message">{fieldErrors.firstName}</span>
                         )}
                     </div>
                     <div className="field-wrapper lastName-field">
                         <label htmlFor="lastName">Last Name <span className="ml-1 text-[red]">*</span></label>
                         <input className="form-input field-input" name="lastName" type="text" id="lastName" value={formData.lastName} onChange={event => { setFormData({ ...formData, lastName: event.target.value }); clearFieldError('lastName'); }} />
                         {fieldErrors.lastName && (
-                            <span className="field-error error-message flex">{fieldErrors.lastName}</span>
+                            <span className="field-error error-message">{fieldErrors.lastName}</span>
                         )}
                     </div>
                 </div>
@@ -345,7 +349,7 @@ const Form = () => {
                         <div className="text-sm text-slate-400">We&apos;ll never share your email with anyone else.</div>
                         <input className="form-input field-input" name="email" type="email" id="email" value={formData.email} onChange={event => { setFormData({ ...formData, email: event.target.value }); clearFieldError('email'); }} />
                         {fieldErrors.email && (
-                            <span className="field-error error-message flex">{fieldErrors.email}</span>
+                            <span className="field-error error-message">{fieldErrors.email}</span>
                         )}
                     </div>
                 </div>
@@ -354,7 +358,7 @@ const Form = () => {
                         <label htmlFor="cellPhone">Cell Phone <span className="ml-1 text-[red]">*</span></label>
                         <input className="form-input field-input" name="cellPhone" type="tel" id="cellPhone" value={formData.cellPhone} onChange={event => { setFormData({ ...formData, cellPhone: event.target.value }); clearFieldError('cellPhone'); }} />
                         {fieldErrors.cellPhone && (
-                            <span className="field-error error-message flex">{fieldErrors.cellPhone}</span>
+                            <span className="field-error error-message">{fieldErrors.cellPhone}</span>
                         )}
                     </div>
                     <div className="field-wrapper">
@@ -376,7 +380,7 @@ const Form = () => {
                             <option value="findingMyBellyButton">Finding my belly button</option>
                         </select>
                         {fieldErrors.subject && (
-                            <span className="field-error error-message flex">{fieldErrors.subject}</span>
+                            <span className="field-error error-message">{fieldErrors.subject}</span>
                         )}
                     </div>
                     <div className="field-wrapper">
@@ -392,7 +396,7 @@ const Form = () => {
                             <option value="support@example.com">Support</option>
                         </select>
                         {fieldErrors.department && (
-                            <span className="field-error error-message flex">{fieldErrors.department}</span>
+                            <span className="field-error error-message">{fieldErrors.department}</span>
                         )}
                     </div>
                 </div>
@@ -413,7 +417,7 @@ const Form = () => {
                         <label htmlFor="message">Message <span className="ml-1 text-[red]">*</span></label>
                         <textarea className="form-textarea field-input" name="message" id="message" rows={5} value={formData.message} onChange={event => { setFormData({ ...formData, message: event.target.value }); clearFieldError('message'); }}></textarea>
                         {fieldErrors.message && (
-                            <span className="field-error error-message flex">{fieldErrors.message}</span>
+                            <span className="field-error error-message">{fieldErrors.message}</span>
                         )}
                     </div>
                 </div>
@@ -441,13 +445,13 @@ const Form = () => {
                             I agree to the <a href="https://solspace.com" className="mx-1 underline">terms &amp; conditions</a> required by this site. <span className="ml-1 text-[red]">*</span>
                         </label>
                         {fieldErrors.acceptTerms && (
-                            <span className="field-error error-message flex">{fieldErrors.acceptTerms}</span>
+                            <span className="field-error error-message">{fieldErrors.acceptTerms}</span>
                         )}
                     </div>
                 </div>
                 <div className="flex flex-row w-full">
                     <div className="flex flex-row items-left justify-left space-y-2 w-full">
-                        <button className="btn-primary" type="submit" disabled={isProcessing || !isFormReady} style={{ cursor: isProcessing || !isFormReady ? 'not-allowed' : 'pointer' }}>{isProcessing ? formProperties.loadingText || 'Submitting...' : !isFormReady ? 'Loading...' : 'Submit'}</button>
+                        <button className="btn-primary" type="submit" disabled={isProcessing || !isFormReady} style={{ cursor: isProcessing || !isFormReady ? 'not-allowed' : 'pointer' }}>{isProcessing ? (formProperties.settings.behavior.processingText || 'Submitting...') : (!isFormReady ? 'Loading...' : 'Submit')}</button>
                     </div>
                 </div>
             </div>
