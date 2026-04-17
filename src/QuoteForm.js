@@ -47,7 +47,7 @@ const defaultFormProperties = {
 
 async function getFormProperties() {
     // See https://docs.solspace.com/craft/freeform/v4/developer/graphql/#how-to-render-a-form
-    const response = await fetch(`/freeform/form/properties/${FORM_ID}`, {
+    const response = await fetch(`/craft/freeform/form/properties/${FORM_ID}`, {
         headers: {
             'Accept': 'application/json',
         }
@@ -62,7 +62,7 @@ async function getFormProperties() {
 
 async function saveQuoteSubmission(params) {
     const { reCaptchaValue, formData, formProperties } = params;
-    const { csrf, hash, honeypot, freeform_payload, reCaptcha } = formProperties;
+    const { csrf, hash, honeypot, freeform_payload } = formProperties;
 
     const body = new FormData();
     body.append(csrf.name, csrf.token);
@@ -70,10 +70,7 @@ async function saveQuoteSubmission(params) {
 
     body.append('formHash', hash);
     body.append('freeform_payload', freeform_payload);
-
-    if (reCaptcha?.enabled && reCaptcha.name && reCaptchaValue) {
-        body.append(reCaptcha.name, reCaptchaValue);
-    }
+    body.append('g-recaptcha-response', reCaptchaValue);
 
     body.append('firstName', formData.firstName);
     body.append('lastName', formData.lastName);
@@ -94,12 +91,13 @@ async function saveQuoteSubmission(params) {
 
     body.append('acceptTerms', formData.acceptTerms);
 
-    const response = await fetch('/actions/freeform/submit', {
+    const response = await fetch('/craft/actions/freeform/submit', {
         method: 'POST',
         headers: {
             'X-CSRF-Token': csrf.token,
             'Cache-Control': 'no-cache',
             'X-Requested-With': 'XMLHttpRequest',
+            'HTTP_X_REQUESTED_WITH': 'XMLHttpRequest',
             'X-Craft-Solspace-Freeform-Mode': 'Headless',
         },
         body,
@@ -228,7 +226,9 @@ const Form = () => {
             if (response && response.success) {
                 setFormData(defaultFormData);
                 setFieldErrors({});
+
                 event.target.reset();
+
                 showSubmissionSuccess();
             } else if (response && response.formErrors && response.formErrors.length > 0) {
                 const formErrors = response.formErrors;
@@ -239,6 +239,7 @@ const Form = () => {
                     console.error(formErrors);
                 } else {
                     showSubmissionError();
+
                     console.error(formErrors);
                 }
             } else if (response && response.errors) {
